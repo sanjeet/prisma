@@ -265,8 +265,28 @@ export class SchemaEngineCLI implements SchemaEngine {
 
   public stop(): void {
     if (this.child) {
+      // Close stdin to tell the schema engine to stop the RPC server and exit.
       this.child.stdin?.end()
-      this.child.kill()
+
+      // Terminate the child process after a timeout if it's still running. On
+      // Unix, this will send a SIGTERM signal to the process, which the schema
+      // engine will handle and initiate a graceful shutdown. Since it has its
+      // own timeout mechanism, we shouldn't wait before sending the signal,
+      // otherwise these timeouts will add up. On Windows, there are no signals
+      // and the kill method will terminate the process immediately, similar to
+      // SIGKILL on Unix, so we should wait to give the schema engine a chance
+      // to gracefully shut down in response to EOF in stdin.
+      const timer = setTimeout(
+        () => {
+          this.child?.kill()
+        },
+        process.platform === 'win32' ? 4000 : 0,
+      ).unref()
+
+      this.child.on('exit', () => {
+        clearTimeout(timer)
+      })
+
       this.isRunning = false
     }
   }
